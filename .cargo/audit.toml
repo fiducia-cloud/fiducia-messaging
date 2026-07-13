@@ -1,0 +1,6 @@
+# This deprecated compatibility repository enables PostgreSQL only. The `rsa`
+# crate is retained in Cargo.lock through SQLx's inactive MySQL dependency graph
+# and is absent from `cargo tree --target all`, so its private-key timing issue is
+# not reachable in the built service. No fixed rsa 0.9 release exists.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]
