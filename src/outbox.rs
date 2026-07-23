@@ -46,15 +46,19 @@ impl Outbox {
 
 pub struct OutboxPublisher {
     database: DatabaseConnection,
-    nats: async_nats::Client,
+    js: async_nats::jetstream::Context,
     batch_size: i64,
 }
 
 impl OutboxPublisher {
+    /// Wrap a NATS client. The client is wrapped in a JetStream context so
+    /// every publish is confirmed by a **server ack** before the row is marked
+    /// published — `flush()` only proved the bytes left the client buffer,
+    /// which let the DB report success for a message the broker never stored.
     pub fn new(database: DatabaseConnection, nats: async_nats::Client) -> Self {
         Self {
             database,
-            nats,
+            js: async_nats::jetstream::new(nats),
             batch_size: 100,
         }
     }
@@ -73,12 +77,27 @@ impl OutboxPublisher {
             let message_id: Uuid = row.try_get("", "message_id")?;
             let subject: String = row.try_get("", "subject")?;
             let body: Vec<u8> = row.try_get("", "envelope")?;
-            match self.nats.publish(subject, body.into()).await {
+            // Tag the publish with the envelope's message_id as `Nats-Msg-Id`
+            // so the JetStream stream over this subject collapses a
+            // crash-window re-publish (published-but-not-marked) into one
+            // stored message, and await the server ack so "published" means
+            // *durably stored* — a subject no stream covers, or a broker that
+            // drops the message, surfaces as a per-row error with backoff
+            // metadata instead of a fire-and-forget flush() the DB records as
+            // success. (Mirrors the ack-awaiting publisher in
+            // fiducia-messaging.rs.)
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", message_id.to_string().as_str());
+            let publish = match self
+                .js
+                .publish_with_headers(subject, headers, body.into())
+                .await
+            {
+                Ok(ack) => ack.await.map(|_ack| ()),
+                Err(error) => Err(error),
+            };
+            match publish {
                 Ok(()) => {
-                    self.nats
-                        .flush()
-                        .await
-                        .map_err(|error| OutboxError::Nats(error.to_string()))?;
                     tx.execute(Statement::from_sql_and_values(
                         DbBackend::Postgres,
                         "UPDATE message_outbox SET published_at=now(), attempts=attempts+1, last_error=NULL WHERE message_id=$1",

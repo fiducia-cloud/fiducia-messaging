@@ -1,3 +1,4 @@
+pub mod connect;
 pub mod database;
 pub mod envelope;
 pub mod inbox;

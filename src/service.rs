@@ -18,7 +18,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let database = Database::connect(options).await?;
     database::apply_schema(&database).await?;
 
-    let nats = async_nats::connect(nats_url).await?;
+    // TLS is policy, not luck: non-loopback endpoints require TLS unless
+    // explicitly opted out, and NATS_CREDS_FILE keeps credentials off the URL
+    // (see `connect`). The URL itself is never logged.
+    let nats = crate::connect::connect(&nats_url).await?;
     tracing::info!(database.orm = "sea-orm", "fiducia outbox publisher started");
     OutboxPublisher::new(database, nats)
         .run(Duration::from_millis(250))
