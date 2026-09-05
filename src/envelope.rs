@@ -29,22 +29,49 @@ pub enum EnvelopeError {
 }
 
 impl<T> Envelope<T> {
-    pub fn new(tenant_id: Uuid, message_type: impl Into<String>, source: impl Into<String>, payload: T) -> Self {
+    pub fn new(
+        tenant_id: Uuid,
+        message_type: impl Into<String>,
+        source: impl Into<String>,
+        payload: T,
+    ) -> Self {
         let message_id = Uuid::new_v4();
-        Self { version: ENVELOPE_VERSION, message_id, tenant_id, message_type: message_type.into(), source: source.into(), occurred_at: Utc::now(), trace_parent: None, causation_id: None, correlation_id: message_id, payload }
+        Self {
+            version: ENVELOPE_VERSION,
+            message_id,
+            tenant_id,
+            message_type: message_type.into(),
+            source: source.into(),
+            occurred_at: Utc::now(),
+            trace_parent: None,
+            causation_id: None,
+            correlation_id: message_id,
+            payload,
+        }
     }
     pub fn validate(&self) -> Result<(), EnvelopeError> {
-        if self.version != ENVELOPE_VERSION { return Err(EnvelopeError::UnsupportedVersion(self.version)); }
-        if self.message_type.trim().is_empty() || self.source.trim().is_empty() { return Err(EnvelopeError::MissingIdentity); }
+        if self.version != ENVELOPE_VERSION {
+            return Err(EnvelopeError::UnsupportedVersion(self.version));
+        }
+        if self.message_type.trim().is_empty() || self.source.trim().is_empty() {
+            return Err(EnvelopeError::MissingIdentity);
+        }
         Ok(())
     }
 }
 
 impl<T: Serialize> Envelope<T> {
-    pub fn encode(&self) -> Result<Vec<u8>, EnvelopeError> { self.validate()?; Ok(serde_json::to_vec(self)?) }
+    pub fn encode(&self) -> Result<Vec<u8>, EnvelopeError> {
+        self.validate()?;
+        Ok(serde_json::to_vec(self)?)
+    }
 }
 impl<T: DeserializeOwned> Envelope<T> {
-    pub fn decode(bytes: &[u8]) -> Result<Self, EnvelopeError> { let value: Self = serde_json::from_slice(bytes)?; value.validate()?; Ok(value) }
+    pub fn decode(bytes: &[u8]) -> Result<Self, EnvelopeError> {
+        let value: Self = serde_json::from_slice(bytes)?;
+        value.validate()?;
+        Ok(value)
+    }
 }
 
 #[cfg(test)]
@@ -52,10 +79,19 @@ mod tests {
     use super::*;
     #[test]
     fn envelope_round_trips_and_rejects_unknown_versions() {
-        let original = Envelope::new(Uuid::new_v4(), "claim.created", "fiducia-memory", serde_json::json!({"id": 1}));
-        let mut decoded = Envelope::<serde_json::Value>::decode(&original.encode().unwrap()).unwrap();
+        let original = Envelope::new(
+            Uuid::new_v4(),
+            "claim.created",
+            "fiducia-memory",
+            serde_json::json!({"id": 1}),
+        );
+        let mut decoded =
+            Envelope::<serde_json::Value>::decode(&original.encode().unwrap()).unwrap();
         assert_eq!(decoded, original);
         decoded.version = 9;
-        assert!(matches!(decoded.validate(), Err(EnvelopeError::UnsupportedVersion(9))));
+        assert!(matches!(
+            decoded.validate(),
+            Err(EnvelopeError::UnsupportedVersion(9))
+        ));
     }
 }
